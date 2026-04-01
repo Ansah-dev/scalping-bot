@@ -1,0 +1,6 @@
+MetaTrader5
+python-telegram-bot
+python-dotenv
+pandas
+requests
+ta
