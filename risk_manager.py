@@ -56,17 +56,18 @@ def check_prop_firm_drawdown():
     update_high_watermark(current_equity)
     
     # Check Daily Drawdown
-    daily_dd = ((starting_balance_today - current_equity) / starting_balance_today) * 100
-    if daily_dd >= DAILY_DRAWDOWN_LIMIT_PERCENT:
-        logger.warning(f"🚫 DAILY DRAWDOWN HIT! ({daily_dd:.2f}%). Shutting down trading.")
-        return False
+    if starting_balance_today > 0:
+        daily_dd = ((starting_balance_today - current_equity) / starting_balance_today) * 100
+        if daily_dd >= DAILY_DRAWDOWN_LIMIT_PERCENT:
+            logger.warning(f"🚫 DAILY DRAWDOWN HIT! ({daily_dd:.2f}%). Shutting down trading.")
+            return False
         
     # Check Max/Total Drawdown (Trailing from highest equity or initial balance)
-    # Using a simple high-watermark drawdown
-    total_dd = ((highest_equity - current_equity) / highest_equity) * 100
-    if total_dd >= TOTAL_DRAWDOWN_LIMIT_PERCENT:
-        logger.warning(f"🚫 TOTAL MAX DRAWDOWN HIT! ({total_dd:.2f}%). Shutting down trading.")
-        return False
+    if highest_equity > 0:
+        total_dd = ((highest_equity - current_equity) / highest_equity) * 100
+        if total_dd >= TOTAL_DRAWDOWN_LIMIT_PERCENT:
+            logger.warning(f"🚫 TOTAL MAX DRAWDOWN HIT! ({total_dd:.2f}%). Shutting down trading.")
+            return False
         
     return True
 
