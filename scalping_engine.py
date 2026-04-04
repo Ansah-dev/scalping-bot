@@ -9,24 +9,15 @@ logger = logging.getLogger(__name__)
 # User specific requested pairs
 PAIRS = ["EURUSD", "BTCUSD", "GBPUSD", "USDCAD"]
 
-def auto_lot():
-    acc = mt5.account_info()
-    if acc is None:
-        return 0.01
-    
-    # For a $2 to $10 challenge, maximum lot based on max leverage.
-    # Warning: Account is so small that 0.01 is often the smallest, and is highly leveraged.
-    # If equity > $5, we could increase to 0.02.
-    equity = acc.equity
-    if equity >= 10.0:
-        return 0.05
-    elif equity >= 5.0:
-        return 0.02
-        
-    return 0.01
+from risk_manager import auto_lot, check_prop_firm_drawdown, can_trade_asset
+from data_extractor import get_current_state_summary
+from ai_brain import consult_ai_for_trade
 
 def execute_auto_scalp():
     """Run continuously in a background loop."""
+    if not check_prop_firm_drawdown():
+        return # Locked out by Prop Firm Rules
+
     acc = mt5.account_info()
     if acc is None:
         return
@@ -51,38 +42,58 @@ def execute_auto_scalp():
         if pos_for_pair:
             continue # Don't open multiple trades per pair at the same time to limit risk
 
-        # 3. Check News / Fundamentals
-        if not can_trade(pair):
+        # 3. Check News / Fundamentals and Asset Lockouts
+        if not can_trade(pair) or not can_trade_asset(pair):
             continue
 
-        # 4. Check Strategy
+        # 4. Check Strategy & Extract Order Flow Data
         signal_data = analyze_strategy(pair)
+        
+        # Pull rich data (for AI later and immediate context)
+        order_flow_text = get_current_state_summary(pair)
         
         lot = auto_lot()
         
-        if signal_data["signal"] == "BUY":
-            logger.info(f"BUY Signal for {pair}. Risking lot {lot}")
-            place_order(pair, mt5.ORDER_TYPE_BUY, lot, signal_data["sl"], signal_data["tp"])
-        elif signal_data["signal"] == "SELL":
-            logger.info(f"SELL Signal for {pair}. Risking lot {lot}")
-            place_order(pair, mt5.ORDER_TYPE_SELL, lot, signal_data["sl"], signal_data["tp"])
+        if signal_data["signal"] in ["BUY", "SELL"]:
+            logger.info(f"Checking AI for {pair}... {order_flow_text}")
+            is_approved, ai_reason = consult_ai_for_trade(pair, signal_data, order_flow_text)
+            
+            if not is_approved:
+                logger.info(f"🚫 AI REJECTED {pair} {signal_data['signal']}. AI Reason: {ai_reason}")
+                continue
+                
+            logger.info(f"🤖 AI APPROVED {pair} {signal_data['signal']}. AI Reason: {ai_reason}")
+            
+            if signal_data["signal"] == "BUY":
+                place_order(pair, mt5.ORDER_TYPE_BUY, lot, signal_data["sl"], signal_data["tp"])
+            else:
+                place_order(pair, mt5.ORDER_TYPE_SELL, lot, signal_data["sl"], signal_data["tp"])
 
 def scalp_on_demand(pair):
     """Used for Telegram manual trigger"""
-    if not can_trade(pair):
-        return f"Trading blocked for {pair} due to upcoming High Impact News!"
+    if not check_prop_firm_drawdown():
+        return "⚠️ Trading locked due to Daily/Max Drawdown Limit!"
+        
+    if not can_trade(pair) or not can_trade_asset(pair):
+        return f"⚠️ Trading blocked for {pair} due to News or Equity restrictions!"
         
     signal_data = analyze_strategy(pair)
     lot = auto_lot()
     
-    if signal_data["signal"] == "BUY":
-        res = place_order(pair, mt5.ORDER_TYPE_BUY, lot, signal_data["sl"], signal_data["tp"])
-        if "error" in res: return res["error"]
-        return f"✅ BUY Order placed on {pair} at {lot} lots. Ticket: {res['ticket']}"
+    if signal_data["signal"] in ["BUY", "SELL"]:
+        order_flow_text = get_current_state_summary(pair)
+        is_approved, ai_reason = consult_ai_for_trade(pair, signal_data, order_flow_text)
         
-    elif signal_data["signal"] == "SELL":
-        res = place_order(pair, mt5.ORDER_TYPE_SELL, lot, signal_data["sl"], signal_data["tp"])
-        if "error" in res: return res["error"]
-        return f"✅ SELL Order placed on {pair} at {lot} lots. Ticket: {res['ticket']}"
+        if not is_approved:
+            return f"🚫 AI REJECTED {pair} {signal_data['signal']}.\nOrder Flow: {order_flow_text}\nAI Reasoning: {ai_reason}"
+            
+        if signal_data["signal"] == "BUY":
+            res = place_order(pair, mt5.ORDER_TYPE_BUY, lot, signal_data["sl"], signal_data["tp"])
+            if "error" in res: return f"Error: {res['error']}"
+            return f"✅ AI APPROVED BUY on {pair} ({lot} lots).\nReason: {ai_reason}\nTicket: {res['ticket']}"
+        else:
+            res = place_order(pair, mt5.ORDER_TYPE_SELL, lot, signal_data["sl"], signal_data["tp"])
+            if "error" in res: return f"Error: {res['error']}"
+            return f"✅ AI APPROVED SELL on {pair} ({lot} lots).\nReason: {ai_reason}\nTicket: {res['ticket']}"
         
     return "WAIT — No trade signal detected currently."
