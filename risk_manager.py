@@ -41,18 +41,50 @@ def check_prop_firm_drawdown():
     Returns True if trading is ALLOWED.
     Returns False if a Prop Firm Drawdown rule has been breached.
     """
-    if not PROP_FIRM_MODE:
-        return True # Not prop firm mode, let it run unconditionally
-        
     acc = get_account_stats()
     if acc is None:
         return False
+        
+    current_equity = acc.equity
+    
+    # --- TARGET EQUITY CHECK ---
+    from dotenv import load_dotenv, set_key
+    import os
+    load_dotenv(override=True)
+    
+    target_str = os.getenv("TARGET_EQUITY")
+    if target_str:
+        try:
+            target_equity = float(target_str)
+            if current_equity >= target_equity:
+                notified = os.getenv("TARGET_NOTIFIED")
+                if notified != "True":
+                    logger.info(f"🎉 TARGET ATTAINED! ${current_equity} >= ${target_equity}. Closing all trades!")
+                    # Lock in profit by closing all open trades
+                    from mt5_trade import close_position
+                    positions = mt5.positions_get()
+                    if positions:
+                        for pos in positions:
+                            if pos.magic == 2024:
+                                close_position(pos.ticket)
+                    
+                    from alerts_manager import broadcast_alert
+                    broadcast_alert(f"🎉 GOAL ATTAINED! Your current equity is ${current_equity:.2f}, reaching your target of ${target_equity:.2f}. All trades have been secured and the bot is paused.")
+                    
+                    env_file = os.path.join(os.path.dirname(__file__), '.env')
+                    set_key(env_file, "TARGET_NOTIFIED", "True")
+                    
+                return False # Halt all future trades
+        except ValueError:
+            pass
+
+    if not PROP_FIRM_MODE:
+        return True # Not prop firm mode, let it run unconditionally
         
     global starting_balance_today, highest_equity
     if starting_balance_today is None:
         initialize_risk_daily()
         
-    current_equity = acc.equity
     update_high_watermark(current_equity)
     
     # Check Daily Drawdown

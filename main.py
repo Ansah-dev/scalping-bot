@@ -22,12 +22,41 @@ ACCOUNT_ID, PASSWORD, SERVER = range(3)
 
 # ----------------- TELEGRAM HANDLERS -----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
+    chat_id = str(update.message.chat_id)
+    env_file = os.path.join(os.path.dirname(__file__), '.env')
+    set_key(env_file, "TELEGRAM_CHAT_ID", chat_id)
+    
+    msg = (
         "🤖 Advanced Auto-Scalp Bot Online!\n"
         "Commands:\n"
         "/scalp [pair] - Manually test strategy\n"
-        "/login - Change Prop Firm or Broker Account dynamically!"
+        "/login - Change Prop Firm or Broker Account dynamically!\n"
+        "/target [amount] - Set your target equity to stop trading"
     )
+    
+    try:
+        acc = mt5.account_info()
+        if acc is not None:
+            msg += f"\n\n💰 Current Equity: ${acc.equity:.2f}"
+    except Exception:
+        pass
+        
+    await update.message.reply_text(msg)
+
+async def target_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("⚠️ Please specify an amount. Example: /target 150.50")
+        return
+        
+    try:
+        amount = float(context.args[0])
+        env_file = os.path.join(os.path.dirname(__file__), '.env')
+        set_key(env_file, "TARGET_EQUITY", str(amount))
+        set_key(env_file, "TARGET_NOTIFIED", "False")
+        load_dotenv(override=True)
+        await update.message.reply_text(f"🎯 Target Equity set to ${amount:.2f}!\nWhen this is reached, trading will halt and your positions will close.")
+    except ValueError:
+        await update.message.reply_text("⚠️ Invalid number. Example: /target 150.50")
 
 async def scalp_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pair = context.args[0].upper() if context.args else "EURUSD"
@@ -83,7 +112,9 @@ async def login_server(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logging.error(f"Login exception: {e}")
     
     if authorized:
-        await update.message.reply_text("✅ Success! Your bot is now permanently connected to the new broker/account!")
+        acc = mt5.account_info()
+        equity_str = f" \n💰 Current Equity: ${acc.equity:.2f}" if acc else ""
+        await update.message.reply_text(f"✅ Success! Your bot is now permanently connected to the new broker/account!{equity_str}")
     else:
         err = mt5.last_error()
         await update.message.reply_text(f"❌ Failed to login. MT5 Error: {err}\nPlease ensure MetaTrader 5 is literally opened on your server screen, OR provide the MT5_TERMINAL_PATH in the .env file. Then try /login again.")
@@ -123,6 +154,7 @@ def main():
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("scalp", scalp_cmd))
+    app.add_handler(CommandHandler("target", target_cmd))
     
     # Setup Conversation Handler for /login
     login_conv_handler = ConversationHandler(
