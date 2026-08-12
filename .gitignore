@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+.venv/
+venv/
+env/
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+
+# Binaries / archives (installers, backups, zips)
+*.exe
+*.zip
+
+# Local secrets — DO NOT COMMIT (à retirer du suivi git si présent)
+.env
